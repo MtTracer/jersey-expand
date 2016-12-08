@@ -119,8 +119,8 @@ public class ExpansionInterceptor implements WriterInterceptor {
 
 	}
 
-	private Object fetchExpandedObject(final Field expansionField, final URI fetchUri, final ExpansionContext ctx,
-			final ExpansionInvoker expansionInvoker) {
+	private Object fetchExpandedObject(final Field expansionField, final URI fetchUri,
+			final ExpansionContext ctx, final ExpansionInvoker expansionInvoker) {
 		final Object expandedFieldValue;
 		final Object cached = expandedUris.get()
 				.get(fetchUri);
