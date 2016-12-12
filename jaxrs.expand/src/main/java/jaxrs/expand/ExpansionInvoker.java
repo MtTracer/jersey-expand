@@ -12,8 +12,6 @@ import javax.ws.rs.core.MultivaluedMap;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.Response.Status;
 
-import com.google.common.base.Strings;
-
 public class ExpansionInvoker implements AutoCloseable {
 
 	private final Logger logger = Logger.getLogger(getClass().getName());
@@ -30,11 +28,8 @@ public class ExpansionInvoker implements AutoCloseable {
 		this.headers = headers;
 	}
 
-	<T> T fetchExpanded(final URI fetchUri, final Class<T> entityType, final String subExpansion) {
-		WebTarget target = client.target(fetchUri);
-		if (!Strings.isNullOrEmpty(subExpansion)) {
-			target = target.queryParam("expand", subExpansion);
-		}
+	<T> T fetchExpanded(final URI fetchUri, final Class<T> entityType) {
+		final WebTarget target = client.target(fetchUri);
 		final Response response = target //
 				.request(mediaType) //
 				.headers(headers) //

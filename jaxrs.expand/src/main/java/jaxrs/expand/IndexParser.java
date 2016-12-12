@@ -15,54 +15,71 @@ public class IndexParser {
 
 	private static final char SUB_EXPANSION_SEPARATOR = '.';
 
-	private static final Pattern indexPattern = Pattern.compile("(.*?)\\[(-?\\d*)?(?:\\:(-?\\d*)?)?\\]");
+	private static final Pattern indexPattern = Pattern
+			.compile("(?<field>.*?)\\[(?<start>-?\\d*)?(?:\\:(?<end>-?\\d*)?)?\\]");
 
-	Map<String, ExpansionContext> parseExpansions(final Object entity, final List<String> expansions) {
-		final Map<String, ExpansionContext> splitted = new HashMap<>();
-		for (final String expansion : expansions) {
-			if (expansion.isEmpty()) {
+	Map<String, ExpansionContext> parseExpansions(final Object entity, final List<String> expansionParams) {
+		final Map<String, ExpansionContext> expansions = new HashMap<>();
+		for (final String expansionParam : expansionParams) {
+			if (expansionParam.isEmpty()) {
 				continue;
 			}
 
-			String mainExpansion;
 			final ExpansionContext ctx = new ExpansionContext();
-			final int dotIndex = expansion.indexOf(SUB_EXPANSION_SEPARATOR);
-			if (dotIndex < 0) {
-				mainExpansion = expansion;
-			} else if (dotIndex == 0 || dotIndex == expansion.length() - 1) {
-				throw new BadRequestException("Invalid expansion parameter: " + expansion);
-			} else {
-				mainExpansion = expansion.substring(0, dotIndex);
-				ctx.subExpansion = expansion.substring(dotIndex + 1);
-			}
+			String mainExpansion = handleSubExpansions(expansionParam, ctx);
+			mainExpansion = handleIndices(mainExpansion, ctx, entity);
 
-			if (entity instanceof Iterable) {
-				ctx.endIndex = Iterables.size((Iterable<?>) entity) - 1;
-			} else if (entity instanceof Map) {
-				ctx.endIndex = ((Map<?, ?>) entity).values()
-						.size() - 1;
-			}
-
-			final Matcher matcher = indexPattern.matcher(mainExpansion);
-			if (matcher.matches()) {
-
-				if (ctx.endIndex < 0) {
-					throw new BadRequestException(
-							"Invalid use of indices for entity of type " + entity.getClass() + ": " + mainExpansion);
-				}
-
-				final int size = ctx.endIndex + 1;
-
-				mainExpansion = matcher.group(1);
-				final int startIndex = parseIndex(matcher.group(2), size);
-				ctx.startIndex = startIndex < 0 ? 0 : startIndex;
-				final int endIndex = parseIndex(matcher.group(3), size);
-				ctx.endIndex = endIndex < 0 ? size - 1 : endIndex;
-			}
-
-			splitted.put(mainExpansion, ctx);
+			expansions.put(mainExpansion, ctx);
 		}
-		return splitted;
+		return expansions;
+	}
+
+	private String handleSubExpansions(final String expansionParam, final ExpansionContext ctx) {
+
+		final int dotIndex = expansionParam.indexOf(SUB_EXPANSION_SEPARATOR);
+		if (dotIndex < 0) {
+			return expansionParam;
+		} else if (dotIndex == 0 || dotIndex == expansionParam.length() - 1) {
+			throw new BadRequestException("Invalid expansion parameter: " + expansionParam);
+		} else {
+			ctx.subExpansion = expansionParam.substring(dotIndex + 1);
+			return expansionParam.substring(0, dotIndex);
+		}
+	}
+
+	private String handleIndices(final String mainExpansion, final ExpansionContext currentCtx, final Object entity) {
+
+		final int entitySize = getEntitySize(entity);
+
+		final Matcher matcher = indexPattern.matcher(mainExpansion);
+		if (!matcher.matches()) {
+			currentCtx.startIndex = entitySize < 0 ? -1 : 0;
+			currentCtx.endIndex = entitySize < 0 ? -1 : entitySize - 1;
+			return mainExpansion;
+		}
+
+		if (entitySize < 0) {
+			throw new BadRequestException("Invalid use of indices. Entity is not an iterable or map: " + mainExpansion);
+		}
+
+		final int startIndex = parseIndex(matcher.group("start"), entitySize);
+		currentCtx.startIndex = startIndex < 0 ? 0 : startIndex;
+		final int endIndex = parseIndex(matcher.group("end"), entitySize);
+		currentCtx.endIndex = endIndex < 0 ? entitySize - 1 : endIndex;
+		return matcher.group("field");
+
+	}
+
+	private int getEntitySize(final Object entity) {
+		if (entity instanceof Iterable) {
+			final Iterable<?> iterable = (Iterable<?>) entity;
+			return Iterables.size(iterable) - 1;
+		} else if (entity instanceof Map) {
+			final Map<?, ?> map = (Map<?, ?>) entity;
+			return map.size() - 1;
+		}
+
+		return -1;
 	}
 
 	private int parseIndex(final String indexStr, final int entitySize) {

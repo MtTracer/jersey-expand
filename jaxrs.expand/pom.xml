@@ -74,6 +74,12 @@
 			<artifactId>jersey-test-framework-provider-jetty</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<dependency>
+			<groupId>com.google.truth</groupId>
+			<artifactId>truth</artifactId>
+			<version>0.30</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 
 	<build>

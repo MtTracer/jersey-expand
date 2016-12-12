@@ -3,9 +3,12 @@ package jaxrs.expand;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 import javax.annotation.Priority;
 import javax.ws.rs.InternalServerErrorException;
@@ -14,14 +17,20 @@ import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.MultivaluedMap;
+import javax.ws.rs.core.UriBuilder;
 import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.ext.WriterInterceptor;
 import javax.ws.rs.ext.WriterInterceptorContext;
 
+import com.google.common.collect.Maps;
+
 import jaxrs.expand.IndexParser.ExpansionContext;
+import jersey.repackaged.com.google.common.collect.Lists;
 
 @Priority(Priorities.ENTITY_CODER - 100)
 public class ExpansionInterceptor implements WriterInterceptor {
+
+	private final Logger logger = Logger.getLogger(getClass().getName());
 
 	private static final String DEFAULT_EXPANSION_URI_FIELD_NAME = "self";
 
@@ -76,8 +85,6 @@ public class ExpansionInterceptor implements WriterInterceptor {
 		final Field[] entityFields = entity.getClass()
 				.getDeclaredFields();
 
-		System.out.println("interception | original entity: " + entity);
-
 		for (final Field field : entityFields) {
 
 			final ExpansionContext expansionCtx = expansionNames.get(field.getName());
@@ -86,7 +93,6 @@ public class ExpansionInterceptor implements WriterInterceptor {
 			}
 		}
 
-		System.out.println("interceptor | changed entity to: " + entity);
 	}
 
 	private void expandEntityField(final Object entity, final Field expansionField, final ExpansionContext ctx,
@@ -101,15 +107,12 @@ public class ExpansionInterceptor implements WriterInterceptor {
 		expansionField.setAccessible(true);
 		try {
 			final Object unexpandedFieldValue = expansionField.get(entity);
-			final String expandableFieldUri = getExpansionUri(uriFieldName, unexpandedFieldValue);
-			final URI fetchUri = uriInfo.getBaseUriBuilder()
-					.path(expandableFieldUri)
-					.build();
-
-			final Object expandedFieldValue = fetchExpandedObject(expansionField, fetchUri, ctx, expansionInvoker);
-
-			if (null != expandedFieldValue) {
-				expansionField.set(entity, expandedFieldValue);
+			if (unexpandedFieldValue instanceof Iterable) {
+				expandIterable(entity, expansionField, ctx, expansionInvoker, uriFieldName, unexpandedFieldValue);
+			} else if (unexpandedFieldValue instanceof Map) {
+				expandMap(entity, expansionField, ctx, expansionInvoker, uriFieldName, unexpandedFieldValue);
+			} else {
+				expandSingleField(entity, expansionField, ctx, expansionInvoker, uriFieldName);
 			}
 		} catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException e) {
 			throw new InternalServerErrorException("Could not expand entity field " + expansionField, e);
@@ -119,16 +122,74 @@ public class ExpansionInterceptor implements WriterInterceptor {
 
 	}
 
-	private Object fetchExpandedObject(final Field expansionField, final URI fetchUri,
-			final ExpansionContext ctx, final ExpansionInvoker expansionInvoker) {
+	private void expandMap(final Object entity, final Field expansionField, final ExpansionContext ctx,
+			final ExpansionInvoker expansionInvoker, final String uriFieldName, final Object unexpandedFieldValue)
+			throws NoSuchFieldException, IllegalAccessException {
+		final Map<?, ?> map = (Map<?, ?>) unexpandedFieldValue;
+		final LinkedHashMap<Object, Object> copy = Maps.newLinkedHashMap(map);
+		final ArrayList<Object> indexKeys = Lists.newArrayList(copy.keySet());
+		for (int i = 0; i < copy.size(); i++) {
+			final Object key = indexKeys.get(i);
+			final Object unexpandedElement = copy.get(key);
+			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
+			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
+					expansionInvoker);
+			copy.put(key, expandedElement);
+		}
+		expansionField.set(entity, copy);
+	}
+
+	private void expandIterable(final Object entity, final Field expansionField, final ExpansionContext ctx,
+			final ExpansionInvoker expansionInvoker, final String uriFieldName, final Object unexpandedFieldValue)
+			throws NoSuchFieldException, IllegalAccessException {
+		final Iterable<?> iterable = (Iterable<?>) unexpandedFieldValue;
+		final ArrayList<Object> copy = Lists.newArrayList(iterable);
+		for (int i = 0; i < copy.size(); i++) {
+			final Object unexpandedElement = copy.get(i);
+			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
+			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
+					expansionInvoker);
+			copy.set(i, expandedElement);
+		}
+		// FIXME classcast - field can be any iterable, not just an
+		// arraylist
+		expansionField.set(entity, copy);
+	}
+
+	private void expandSingleField(final Object entity, final Field expansionField, final ExpansionContext ctx,
+			final ExpansionInvoker expansionInvoker, final String uriFieldName)
+			throws IllegalAccessException, NoSuchFieldException {
+		final Object unexpandedFieldValue = expansionField.get(entity);
+		final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedFieldValue);
+
+		final Object expandedFieldValue = fetchExpandedObject(expansionField.getType(), fetchUri, expansionInvoker);
+
+		if (null != expandedFieldValue) {
+			expansionField.set(entity, expandedFieldValue);
+		}
+	}
+
+	private URI createFetchUri(final ExpansionContext ctx, final String uriFieldName, final Object unexpandedFieldValue)
+			throws NoSuchFieldException, IllegalAccessException {
+		final String expandableFieldUri = getExpansionUri(uriFieldName, unexpandedFieldValue);
+		final UriBuilder uriBuilder = uriInfo.getBaseUriBuilder()
+				.path(expandableFieldUri);
+		final String subExpansion = ctx.getSubExpansion();
+		if (subExpansion != null) {
+			uriBuilder.queryParam("expand", subExpansion);
+		}
+		return uriBuilder.build();
+	}
+
+	private Object fetchExpandedObject(final Class<?> entityType, final URI fetchUri,
+			final ExpansionInvoker expansionInvoker) {
 		final Object expandedFieldValue;
 		final Object cached = expandedUris.get()
 				.get(fetchUri);
 		if (null != cached) {
 			expandedFieldValue = cached;
 		} else {
-			expandedFieldValue = expansionInvoker.fetchExpanded(fetchUri, expansionField.getType(),
-					ctx.getSubExpansion());
+			expandedFieldValue = expansionInvoker.fetchExpanded(fetchUri, entityType);
 			expandedUris.get()
 					.put(fetchUri, expandedFieldValue);
 		}

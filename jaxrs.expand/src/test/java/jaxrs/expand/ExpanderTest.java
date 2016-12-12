@@ -1,13 +1,23 @@
 package jaxrs.expand;
 
+import static com.google.common.truth.Truth.assertThat;
+
+import java.util.List;
+
 import javax.ws.rs.core.Application;
+import javax.ws.rs.core.GenericType;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
 
 import org.glassfish.jersey.CommonProperties;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.test.JerseyTest;
 import org.glassfish.jersey.test.TestProperties;
 import org.junit.Test;
+
+import jaxrs.expand.GroupResource.Group;
+import jaxrs.expand.PermissionResource.Permission;
+import jaxrs.expand.UserResource.User;
 
 public class ExpanderTest extends JerseyTest {
 
@@ -26,17 +36,27 @@ public class ExpanderTest extends JerseyTest {
 
 	@Test
 	public void testExpansion() {
-		try {
-			final String result = target("users") //
-					// .path("1234") //
-					.queryParam("expand", "group.permission") //
-					.queryParam("pretty")
-					.request(MediaType.APPLICATION_JSON) //
-					.get(String.class);
-			System.out.println(result);
-		} catch (final Exception e) {
-			e.printStackTrace();
-		}
+		final Response response = target("users") //
+				// .path("1234") //
+				.queryParam("expand", "group.permission") //
+				.queryParam("pretty")
+				.request(MediaType.APPLICATION_JSON) //
+				.get();
+
+		response.bufferEntity();
+		System.out.println(response.readEntity(String.class));
+
+		final List<User> users = response.readEntity(new GenericType<List<User>>() {
+		});
+		assertThat(users).hasSize(5);
+		final User user0 = users.get(0);
+		final Group group = user0.getGroup();
+		assertThat(group.getName()).isNotNull();
+		assertThat(group.getName()).isNotEmpty();
+		final Permission permission = group.getPermission();
+		assertThat(permission.getDescription()).isNotNull();
+		assertThat(permission.getDescription()).isNotEmpty();
+
 	}
 
 }
