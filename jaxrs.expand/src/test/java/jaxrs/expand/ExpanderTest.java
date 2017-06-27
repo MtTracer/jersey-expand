@@ -2,6 +2,7 @@ package jaxrs.expand;
 
 import static com.google.common.truth.Truth.assertThat;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import javax.ws.rs.core.Application;
@@ -38,7 +39,7 @@ public class ExpanderTest extends JerseyTest {
 	public void testExpansion() {
 		final Response response = target("users") //
 				// .path("1234") //
-				.queryParam("expand", "group.permission") //
+				.queryParam("expand", "group.permissions[0]") //
 				.queryParam("pretty")
 				.request(MediaType.APPLICATION_JSON) //
 				.get();
@@ -53,9 +54,14 @@ public class ExpanderTest extends JerseyTest {
 		final Group group = user0.getGroup();
 		assertThat(group.getName()).isNotNull();
 		assertThat(group.getName()).isNotEmpty();
-		final Permission permission = group.getPermission();
+		final List<Permission> permissions = new ArrayList<>(group.getPermissions());
+		final Permission permission = permissions.get(0);
 		assertThat(permission.getDescription()).isNotNull();
 		assertThat(permission.getDescription()).isNotEmpty();
+		final Permission permission2 = permissions.get(1);
+		assertThat(permission2.getDescription()).isNull();
+		final Permission permission3 = permissions.get(2);
+		assertThat(permission3.getDescription()).isNull();
 
 	}
 

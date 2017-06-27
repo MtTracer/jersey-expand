@@ -1,6 +1,7 @@
 package jaxrs.expand;
 
 import java.net.URI;
+import java.util.Set;
 
 import javax.ws.rs.GET;
 import javax.ws.rs.Path;
@@ -11,6 +12,7 @@ import javax.ws.rs.core.MediaType;
 import org.glassfish.jersey.linking.InjectLink;
 
 import com.google.common.base.MoreObjects;
+import com.google.common.collect.Sets;
 
 import jaxrs.expand.PermissionResource.Permission;
 
@@ -26,10 +28,16 @@ public class GroupResource {
 		group.setId(id);
 		group.setName("group" + id);
 
-		final Permission permission = new Permission();
-		permission.setGroupId(id);
-		permission.setName("PRINT");
-		group.setPermission(permission);
+		final Permission permission1 = new Permission();
+		permission1.setGroupId(id);
+		permission1.setName("PRINT");
+		final Permission permission2 = new Permission();
+		permission2.setGroupId(id);
+		permission2.setName("DELETE");
+		final Permission permission3 = new Permission();
+		permission3.setGroupId(id);
+		permission3.setName("KILL");
+		group.setPermissions(Sets.newHashSet(permission1, permission2, permission3));
 
 		return group;
 	}
@@ -40,7 +48,7 @@ public class GroupResource {
 
 		private String name;
 
-		private Permission permission;
+		private Set<Permission> permissions;
 
 		@InjectLink(resource = GroupResource.class, method = "getGroup")
 		private URI self;
@@ -61,12 +69,12 @@ public class GroupResource {
 			this.name = name;
 		}
 
-		public void setPermission(final Permission permission) {
-			this.permission = permission;
+		public void setPermissions(final Set<Permission> permissions) {
+			this.permissions = permissions;
 		}
 
-		public Permission getPermission() {
-			return permission;
+		public Set<Permission> getPermissions() {
+			return permissions;
 		}
 
 		public URI getSelf() {
@@ -79,7 +87,7 @@ public class GroupResource {
 					.omitNullValues()
 					.add("id", id)
 					.add("name", name)
-					.add("permission", permission)
+					.add("permissions", permissions)
 					.toString();
 		}
 	}

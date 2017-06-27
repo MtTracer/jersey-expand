@@ -9,6 +9,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.logging.Logger;
 
 import javax.annotation.Priority;
@@ -25,7 +26,7 @@ import javax.ws.rs.ext.WriterInterceptorContext;
 
 import com.google.common.collect.Maps;
 
-import jaxrs.expand.IndexParser.ExpansionContext;
+import jaxrs.expand.ExpansionParser.ExpansionContext;
 import jersey.repackaged.com.google.common.collect.Lists;
 
 @Priority(Priorities.ENTITY_CODER - 100)
@@ -56,7 +57,9 @@ public class ExpansionInterceptor implements WriterInterceptor {
 		}
 
 		final Object entity = context.getEntity();
-		final Map<String, ExpansionContext> expansionContexts = new IndexParser().parseExpansions(entity, expansions);
+		// TODO make ignoreInvalid configurable
+		final Map<String, ExpansionContext> expansionContexts = new ExpansionParser(true).parseExpansions(entity,
+				expansions);
 
 		final MediaType mediaType = context.getMediaType();
 		final MultivaluedMap<String, Object> headers = context.getHeaders();
@@ -83,15 +86,17 @@ public class ExpansionInterceptor implements WriterInterceptor {
 
 	private void expandEntity(final Object entity, final Map<String, ExpansionContext> expansionContexts,
 			final ExpansionInvoker expansionInvoker) {
-		final Field[] entityFields = entity.getClass()
-				.getDeclaredFields();
-		// TODO iterate over expansions and try getting field
-		for (final Field field : entityFields) {
 
-			final ExpansionContext expansionCtx = expansionContexts.get(field.getName());
-			if (null != expansionCtx) {
-				expandEntityField(entity, field, expansionCtx, expansionInvoker);
+		for (final Entry<String, ExpansionContext> expansionEntry : expansionContexts.entrySet()) {
+			final String expansionFieldName = expansionEntry.getKey();
+			final FieldAccessor fieldAccessor = new FieldAccessor(entity, expansionFieldName);
+			final Field optField = fieldAccessor.findField();
+			if (null == optField) {
+				continue;
 			}
+
+			expandEntityField(entity, optField, expansionEntry.getValue(), expansionInvoker);
+
 		}
 
 	}

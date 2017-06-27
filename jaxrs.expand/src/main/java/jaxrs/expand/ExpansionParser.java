@@ -3,20 +3,31 @@ package jaxrs.expand;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.ws.rs.BadRequestException;
+import javax.ws.rs.InternalServerErrorException;
 
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 
-public class IndexParser {
+public class ExpansionParser {
 
 	private static final char SUB_EXPANSION_SEPARATOR = '.';
 
 	private static final Pattern indexPattern = Pattern
 			.compile("(?<field>.*?)\\[(?<start>-?\\d*)?(?:\\:(?<end>-?\\d*)?)?\\]");
+
+	private final Logger logger = Logger.getLogger(getClass().getName());
+
+	private final boolean ignoreInvalid;
+
+	ExpansionParser(final boolean ignoreInvalid) {
+		this.ignoreInvalid = ignoreInvalid;
+	}
 
 	Map<String, ExpansionContext> parseExpansions(final Object entity, final List<String> expansionParams) {
 		final Map<String, ExpansionContext> expansions = new HashMap<>();
@@ -26,10 +37,20 @@ public class IndexParser {
 			}
 
 			final ExpansionContext ctx = new ExpansionContext();
-			String mainExpansion = handleSubExpansions(expansionParam, ctx);
-			mainExpansion = handleIndices(mainExpansion, ctx, entity);
+			try {
+				String mainExpansion = handleSubExpansions(expansionParam, ctx);
+				mainExpansion = handleIndices(mainExpansion, ctx, entity);
+				expansions.put(mainExpansion, ctx);
+			} catch (final BadRequestException e) {
+				if (ignoreInvalid) {
+					logger.log(Level.WARNING, "Could not parse expansion parameter: " + expansionParam, e);
+					continue;
+				}
+				throw e;
+			} catch (final Exception e) {
+				throw new InternalServerErrorException("Could not parse expansion parameter: " + expansionParam, e);
+			}
 
-			expansions.put(mainExpansion, ctx);
 		}
 		return expansions;
 	}
@@ -47,35 +68,46 @@ public class IndexParser {
 		}
 	}
 
-	private String handleIndices(final String mainExpansion, final ExpansionContext currentCtx, final Object entity) {
-
-		final int entitySize = getEntitySize(entity);
+	private String handleIndices(final String mainExpansion, final ExpansionContext currentCtx, final Object entity)
+			throws IllegalArgumentException, IllegalAccessException {
 
 		final Matcher matcher = indexPattern.matcher(mainExpansion);
 		if (!matcher.matches()) {
+			final int entitySize = getFieldSize(entity, mainExpansion);
 			currentCtx.startIndex = entitySize < 0 ? -1 : 0;
 			currentCtx.endIndex = entitySize < 0 ? -1 : entitySize - 1;
 			return mainExpansion;
 		}
 
+		final String expansionField = matcher.group("field");
+		final int entitySize = getFieldSize(entity, expansionField);
 		if (entitySize < 0) {
 			throw new BadRequestException("Invalid use of indices. Entity is not an iterable or map: " + mainExpansion);
 		}
 
 		final int startIndex = parseIndex(matcher.group("start"), entitySize);
 		currentCtx.startIndex = startIndex < 0 ? 0 : startIndex;
-		final int endIndex = parseIndex(matcher.group("end"), entitySize);
-		currentCtx.endIndex = endIndex < 0 ? entitySize - 1 : endIndex;
-		return matcher.group("field");
+		final String endIndexStr = matcher.group("end");
+		if (null == endIndexStr) {
+			currentCtx.endIndex = currentCtx.startIndex;
+		} else {
+			final int endIndex = parseIndex(endIndexStr, entitySize);
+			currentCtx.endIndex = endIndex < 0 ? entitySize - 1 : endIndex;
+		}
+		return expansionField;
 
 	}
 
-	private int getEntitySize(final Object entity) {
-		if (entity instanceof Iterable) {
-			final Iterable<?> iterable = (Iterable<?>) entity;
+	private int getFieldSize(final Object entity, final String fieldName)
+			throws IllegalArgumentException, IllegalAccessException {
+		final FieldAccessor fieldAccessor = new FieldAccessor(entity, fieldName);
+
+		final Object fieldEntity = fieldAccessor.getFieldValue();
+		if (fieldEntity instanceof Iterable) {
+			final Iterable<?> iterable = (Iterable<?>) fieldEntity;
 			return Iterables.size(iterable) - 1;
-		} else if (entity instanceof Map) {
-			final Map<?, ?> map = (Map<?, ?>) entity;
+		} else if (fieldEntity instanceof Map) {
+			final Map<?, ?> map = (Map<?, ?>) fieldEntity;
 			return map.size() - 1;
 		}
 
