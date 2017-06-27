@@ -54,13 +54,13 @@ public class ExpanderTest extends JerseyTest {
 		final Group group = user0.getGroup();
 		assertThat(group.getName()).isNotNull();
 		assertThat(group.getName()).isNotEmpty();
-		final List<Permission> permissions = new ArrayList<>(group.getPermissions());
-		final Permission permission = permissions.get(0);
+		final Permission[] permissions = group.getPermissions();
+		final Permission permission = permissions[0];
 		assertThat(permission.getDescription()).isNotNull();
 		assertThat(permission.getDescription()).isNotEmpty();
-		final Permission permission2 = permissions.get(1);
+		final Permission permission2 = permissions[1];
 		assertThat(permission2.getDescription()).isNull();
-		final Permission permission3 = permissions.get(2);
+		final Permission permission3 = permissions[2];
 		assertThat(permission3.getDescription()).isNull();
 
 	}

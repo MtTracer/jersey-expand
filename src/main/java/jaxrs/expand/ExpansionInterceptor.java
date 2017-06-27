@@ -1,6 +1,7 @@
 package jaxrs.expand;
 
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.ArrayList;
@@ -114,8 +115,10 @@ public class ExpansionInterceptor implements WriterInterceptor {
 		expansionField.setAccessible(true);
 		try {
 			final Object unexpandedFieldValue = expansionField.get(entity);
-			if (unexpandedFieldValue instanceof Collection) {
-				expandCollection(ctx, expansionInvoker, uriFieldName, (Collection<Object>) unexpandedFieldValue);
+			if (unexpandedFieldValue instanceof List) {
+				expandList(ctx, expansionInvoker, uriFieldName, (List<Object>) unexpandedFieldValue);
+			} else if(unexpandedFieldValue instanceof Object[]) {
+				expandArray(ctx, expansionInvoker, uriFieldName, (Object[]) unexpandedFieldValue);
 			} else if (unexpandedFieldValue instanceof Map) {
 				expandMap(ctx, expansionInvoker, uriFieldName, (Map<Object, Object>) unexpandedFieldValue);
 			} else {
@@ -129,23 +132,37 @@ public class ExpansionInterceptor implements WriterInterceptor {
 
 	}
 
-	private void expandCollection(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
-			final String uriFieldName, final Collection<Object> collection)
-			throws NoSuchFieldException, IllegalAccessException {
-		final ArrayList<Object> copy = Lists.newArrayList(collection);
-		collection.clear();
-		for (int i = 0; i < copy.size(); i++) {
-			final Object unexpandedElement = copy.get(i);
+	private void expandArray(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
+			final String uriFieldName, final Object[] objects)
+					throws NoSuchFieldException, IllegalAccessException {
+		for (int i = 0; i < objects.length; i++) {
+			final Object unexpandedElement = objects[i];
 			if (i < ctx.getStartIndex() || i > ctx.getEndIndex()) {
-				collection.add(unexpandedElement);
+				continue;
+			}
+			
+			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
+			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
+					expansionInvoker);
+			objects[i] = expandedElement;
+		}
+		
+	}
+	private void expandList(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
+			final String uriFieldName, final List<Object> objects)
+			throws NoSuchFieldException, IllegalAccessException {
+		for (int i = 0; i < objects.size(); i++) {
+			final Object unexpandedElement = objects.get(i);
+			if (i < ctx.getStartIndex() || i > ctx.getEndIndex()) {
 				continue;
 			}
 
 			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
 			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
 					expansionInvoker);
-			collection.add(expandedElement);
+			objects.set(i, expandedElement);
 		}
+		
 	}
 
 	private void expandMap(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,

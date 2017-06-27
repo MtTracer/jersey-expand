@@ -1,5 +1,6 @@
 package jaxrs.expand;
 
+import java.lang.reflect.Array;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -80,19 +81,19 @@ public class ExpansionParser {
 		}
 
 		final String expansionField = matcher.group("field");
-		final int entitySize = getFieldSize(entity, expansionField);
-		if (entitySize < 0) {
-			throw new BadRequestException("Invalid use of indices. Entity is not an iterable or map: " + mainExpansion);
+		final int lastElementIndex = getFieldSize(entity, expansionField);
+		if (lastElementIndex < 0) {
+			throw new BadRequestException("Invalid use of indices. Entity is not an array, list or map: " + mainExpansion);
 		}
 
-		final int startIndex = parseIndex(matcher.group("start"), entitySize);
+		final int startIndex = parseIndex(matcher.group("start"), lastElementIndex);
 		currentCtx.startIndex = startIndex < 0 ? 0 : startIndex;
 		final String endIndexStr = matcher.group("end");
 		if (null == endIndexStr) {
 			currentCtx.endIndex = currentCtx.startIndex;
 		} else {
-			final int endIndex = parseIndex(endIndexStr, entitySize);
-			currentCtx.endIndex = endIndex < 0 ? entitySize - 1 : endIndex;
+			final int endIndex = parseIndex(endIndexStr, lastElementIndex);
+			currentCtx.endIndex = endIndex < 0 ? lastElementIndex - 1 : endIndex;
 		}
 		return expansionField;
 
@@ -103,18 +104,23 @@ public class ExpansionParser {
 		final FieldAccessor fieldAccessor = new FieldAccessor(entity, fieldName);
 
 		final Object fieldEntity = fieldAccessor.getFieldValue();
-		if (fieldEntity instanceof Iterable) {
+		if (fieldEntity instanceof List) {
 			final Iterable<?> iterable = (Iterable<?>) fieldEntity;
 			return Iterables.size(iterable) - 1;
+		} else if(fieldEntity instanceof Object[]) {
+			final Object[] array = (Object[]) fieldEntity;
+			return array.length - 1;
 		} else if (fieldEntity instanceof Map) {
 			final Map<?, ?> map = (Map<?, ?>) fieldEntity;
 			return map.size() - 1;
 		}
+		
+		
 
 		return -1;
 	}
 
-	private int parseIndex(final String indexStr, final int entitySize) {
+	private int parseIndex(final String indexStr, final int lastElementIndex) {
 		if (Strings.isNullOrEmpty(indexStr)) {
 			return -1;
 		}
@@ -126,7 +132,7 @@ public class ExpansionParser {
 			}
 
 			// size - abs(index)
-			return entitySize + index;
+			return lastElementIndex + index + 1;
 
 		} catch (final NumberFormatException e) {
 			throw new BadRequestException("Invalid index: " + indexStr);
