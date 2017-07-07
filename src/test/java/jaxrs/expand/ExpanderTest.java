@@ -4,6 +4,7 @@ import static com.google.common.truth.Truth.assertThat;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import javax.ws.rs.core.Application;
 import javax.ws.rs.core.GenericType;
@@ -63,6 +64,30 @@ public class ExpanderTest extends JerseyTest {
 		final Permission permission3 = permissions[2];
 		assertThat(permission3.getDescription()).isNull();
 
+	}
+	
+	@Test
+	public void testMapExpansion() {
+		final Response response = target("users") //
+				.path("0") //
+				.queryParam("expand", "userPermissions.expandMe") //
+				.queryParam("pretty")
+				.request(MediaType.APPLICATION_JSON) //
+				.get();
+		
+		response.bufferEntity();
+		System.out.println(response.readEntity(String.class));
+		
+		final User user = response.readEntity(new GenericType<User>() {
+		});
+		
+		Map<String, Permission> userPermissions = user.getUserPermissions();
+		Permission expandedPermission = userPermissions.get("expandMe");
+		assertThat(expandedPermission.getDescription()).isNotNull();
+		Permission unexpandedPermission = userPermissions.get("dontExpandMe");
+		assertThat(unexpandedPermission.getDescription()).isNull();
+		
+		
 	}
 
 }

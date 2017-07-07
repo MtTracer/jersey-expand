@@ -56,6 +56,12 @@ public class ExpansionParser {
 		return expansions;
 	}
 
+	//TODO workaround to get mainExpansion to determine key when expanding maps
+	public String parseMainExpansion(String expansionParam) {
+		final ExpansionContext dummyCtx = new ExpansionContext();
+		return handleSubExpansions(expansionParam, dummyCtx);
+	}
+	
 	private String handleSubExpansions(final String expansionParam, final ExpansionContext ctx) {
 
 		final int dotIndex = expansionParam.indexOf(SUB_EXPANSION_SEPARATOR);
@@ -101,7 +107,7 @@ public class ExpansionParser {
 
 	private int getFieldSize(final Object entity, final String fieldName)
 			throws IllegalArgumentException, IllegalAccessException {
-		final FieldAccessor fieldAccessor = new FieldAccessor(entity, fieldName);
+		final ObjectFieldAccessor fieldAccessor = new ObjectFieldAccessor(entity, fieldName);
 
 		final Object fieldEntity = fieldAccessor.getFieldValue();
 		if (fieldEntity instanceof List) {
@@ -110,12 +116,7 @@ public class ExpansionParser {
 		} else if(fieldEntity instanceof Object[]) {
 			final Object[] array = (Object[]) fieldEntity;
 			return array.length - 1;
-		} else if (fieldEntity instanceof Map) {
-			final Map<?, ?> map = (Map<?, ?>) fieldEntity;
-			return map.size() - 1;
-		}
-		
-		
+		} 		
 
 		return -1;
 	}

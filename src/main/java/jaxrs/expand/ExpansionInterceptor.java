@@ -25,9 +25,12 @@ import javax.ws.rs.core.UriInfo;
 import javax.ws.rs.ext.WriterInterceptor;
 import javax.ws.rs.ext.WriterInterceptorContext;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 
+import jaxrs.expand.AccessEntriesBy.ValueAccessor;
 import jaxrs.expand.ExpansionParser.ExpansionContext;
+import jaxrs.expand.FieldAccessorFactory.FieldAccessor;
 import jersey.repackaged.com.google.common.collect.Lists;
 
 @Priority(Priorities.ENTITY_CODER - 100)
@@ -72,6 +75,7 @@ public class ExpansionInterceptor implements WriterInterceptor {
 					expandEntity(subEntity, expansionContexts, expansionInvoker);
 				}
 			} else if (entity instanceof Map) {
+				//TODO expand like single entity
 				final Map<?, ?> map = (Map<?, ?>) entity;
 				for (final Object subEntity : map.values()) {
 					expandEntity(subEntity, expansionContexts, expansionInvoker);
@@ -90,67 +94,62 @@ public class ExpansionInterceptor implements WriterInterceptor {
 
 		for (final Entry<String, ExpansionContext> expansionEntry : expansionContexts.entrySet()) {
 			final String expansionFieldName = expansionEntry.getKey();
-			final FieldAccessor fieldAccessor = new FieldAccessor(entity, expansionFieldName);
-			final Field optField = fieldAccessor.findField();
-			if (null == optField) {
+			final FieldAccessor fieldAccessor = FieldAccessorFactory.getFieldAccessor(entity, expansionFieldName);
+			if (!fieldAccessor.hasField()) {
 				continue;
 			}
 
-			expandEntityField(entity, optField, expansionEntry.getValue(), expansionInvoker);
+			expandEntityField(fieldAccessor, expansionEntry.getValue(), expansionInvoker);
 
 		}
 
 	}
 
 	@SuppressWarnings("unchecked")
-	private void expandEntityField(final Object entity, final Field expansionField, final ExpansionContext ctx,
+	private void expandEntityField(final FieldAccessor expansionFieldAccessor, final ExpansionContext ctx,
 			final ExpansionInvoker expansionInvoker) {
 
-		final String uriFieldName = findExpansionUriFieldName(expansionField);
+		final String uriFieldName = findExpansionUriFieldName(expansionFieldAccessor);
 		if (null == uriFieldName) {
 			return;
 		}
 
-		final boolean fieldWasAccessible = expansionField.isAccessible();
-		expansionField.setAccessible(true);
 		try {
-			final Object unexpandedFieldValue = expansionField.get(entity);
+			final Object unexpandedFieldValue = expansionFieldAccessor.getFieldValue();
 			if (unexpandedFieldValue instanceof List) {
 				expandList(ctx, expansionInvoker, uriFieldName, (List<Object>) unexpandedFieldValue);
-			} else if(unexpandedFieldValue instanceof Object[]) {
+			} else if (unexpandedFieldValue instanceof Object[]) {
 				expandArray(ctx, expansionInvoker, uriFieldName, (Object[]) unexpandedFieldValue);
 			} else if (unexpandedFieldValue instanceof Map) {
-				expandMap(ctx, expansionInvoker, uriFieldName, (Map<Object, Object>) unexpandedFieldValue);
+				expandMap(expansionFieldAccessor, ctx, expansionInvoker);
 			} else {
-				expandSingleField(entity, expansionField, ctx, expansionInvoker, uriFieldName);
+				expandSingleField(expansionFieldAccessor, ctx, expansionInvoker, uriFieldName);
 			}
 		} catch (IllegalArgumentException | IllegalAccessException | NoSuchFieldException | SecurityException e) {
-			throw new InternalServerErrorException("Could not expand entity field " + expansionField, e);
-		} finally {
-			expansionField.setAccessible(fieldWasAccessible);
+			throw new InternalServerErrorException(
+					"Could not expand entity field " + expansionFieldAccessor.getFieldName(), e);
 		}
 
 	}
 
 	private void expandArray(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
-			final String uriFieldName, final Object[] objects)
-					throws NoSuchFieldException, IllegalAccessException {
+			final String uriFieldName, final Object[] objects) throws NoSuchFieldException, IllegalAccessException {
 		for (int i = 0; i < objects.length; i++) {
 			final Object unexpandedElement = objects[i];
 			if (i < ctx.getStartIndex() || i > ctx.getEndIndex()) {
 				continue;
 			}
-			
+
 			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
 			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
 					expansionInvoker);
 			objects[i] = expandedElement;
 		}
-		
+
 	}
+
 	private void expandList(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
-			final String uriFieldName, final List<Object> objects)
-			throws NoSuchFieldException, IllegalAccessException {
+			final String uriFieldName, final List<Object> objects) throws NoSuchFieldException, IllegalAccessException {
 		for (int i = 0; i < objects.size(); i++) {
 			final Object unexpandedElement = objects.get(i);
 			if (i < ctx.getStartIndex() || i > ctx.getEndIndex()) {
@@ -162,48 +161,42 @@ public class ExpansionInterceptor implements WriterInterceptor {
 					expansionInvoker);
 			objects.set(i, expandedElement);
 		}
-		
+
 	}
 
-	private void expandMap(final ExpansionContext ctx, final ExpansionInvoker expansionInvoker,
-			final String uriFieldName, final Map<Object, Object> map)
-			throws NoSuchFieldException, IllegalAccessException {
-		final LinkedHashMap<Object, Object> copy = Maps.newLinkedHashMap(map);
-		map.clear();
-		final ArrayList<Object> indexKeys = Lists.newArrayList(copy.keySet());
-		for (int i = 0; i < copy.size(); i++) {
-			final Object key = indexKeys.get(i);
-			final Object unexpandedElement = copy.get(key);
-			if (i < ctx.getStartIndex() || i > ctx.getEndIndex()) {
-				map.put(key, unexpandedElement);
-				continue;
-			}
+	private void expandMap(FieldAccessor parentAccessor, final ExpansionContext ctx, final ExpansionInvoker expansionInvoker) {
 
-			final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedElement);
-			final Object expandedElement = fetchExpandedObject(unexpandedElement.getClass(), fetchUri,
-					expansionInvoker);
-			map.put(key, expandedElement);
+		ExpansionParser expansionParser = new ExpansionParser(true);
+		String expansionKey = expansionParser.parseMainExpansion(ctx.getSubExpansion());
+		
+		FieldAccessor mapAccessor = FieldAccessorFactory.getFieldAccessor(parentAccessor, expansionKey);
+		if (mapAccessor.hasField()) {
+			Object subEntity = mapAccessor.getFieldValue();
+			Map<String, ExpansionContext> subExpansions = expansionParser.parseExpansions(subEntity, ImmutableList.of(ctx.getSubExpansion()));
+			ExpansionContext subContext = subExpansions.get(expansionKey);
+			
+			expandEntityField(mapAccessor, subContext, expansionInvoker);
 		}
 	}
 
-	private void expandSingleField(final Object entity, final Field expansionField, final ExpansionContext ctx,
+	private void expandSingleField(final FieldAccessor expansionFieldAccessor, final ExpansionContext ctx,
 			final ExpansionInvoker expansionInvoker, final String uriFieldName)
 			throws IllegalAccessException, NoSuchFieldException {
-		final Object unexpandedFieldValue = expansionField.get(entity);
+		final Object unexpandedFieldValue = expansionFieldAccessor.getFieldValue();
 		final URI fetchUri = createFetchUri(ctx, uriFieldName, unexpandedFieldValue);
 
-		final Object expandedFieldValue = fetchExpandedObject(expansionField.getType(), fetchUri, expansionInvoker);
+		final Object expandedFieldValue = fetchExpandedObject(expansionFieldAccessor.getFieldType(), fetchUri,
+				expansionInvoker);
 
 		if (null != expandedFieldValue) {
-			expansionField.set(entity, expandedFieldValue);
+			expansionFieldAccessor.setFieldValue(expandedFieldValue);
 		}
 	}
 
 	private URI createFetchUri(final ExpansionContext ctx, final String uriFieldName, final Object unexpandedFieldValue)
 			throws NoSuchFieldException, IllegalAccessException {
 		final String expandableFieldUri = getExpansionUri(uriFieldName, unexpandedFieldValue);
-		final UriBuilder uriBuilder = uriInfo.getBaseUriBuilder()
-				.path(expandableFieldUri);
+		final UriBuilder uriBuilder = uriInfo.getBaseUriBuilder().path(expandableFieldUri);
 		final String subExpansion = ctx.getSubExpansion();
 		if (subExpansion != null) {
 			uriBuilder.queryParam("expand", subExpansion);
@@ -214,44 +207,34 @@ public class ExpansionInterceptor implements WriterInterceptor {
 	private <T> T fetchExpandedObject(final Class<T> entityType, final URI fetchUri,
 			final ExpansionInvoker expansionInvoker) {
 		final T expandedFieldValue;
-		final Object cached = expandedUris.get()
-				.get(fetchUri);
+		final Object cached = expandedUris.get().get(fetchUri);
 		if (null != cached) {
 			expandedFieldValue = entityType.cast(cached);
 		} else {
 			expandedFieldValue = expansionInvoker.fetchExpanded(fetchUri, entityType);
-			expandedUris.get()
-					.put(fetchUri, expandedFieldValue);
+			expandedUris.get().put(fetchUri, expandedFieldValue);
 		}
 		return expandedFieldValue;
 	}
 
 	private String getExpansionUri(final String uriFieldName, final Object unexpandedFieldValue)
 			throws NoSuchFieldException, IllegalAccessException {
-		final Field uriField = unexpandedFieldValue.getClass()
-				.getDeclaredField(uriFieldName);
+		final Field uriField = unexpandedFieldValue.getClass().getDeclaredField(uriFieldName);
 
 		final boolean wasAccessible = uriField.isAccessible();
 		uriField.setAccessible(true);
 
-		final String expandableFieldUri = uriField.get(unexpandedFieldValue)
-				.toString();
+		final String expandableFieldUri = uriField.get(unexpandedFieldValue).toString();
 
 		uriField.setAccessible(wasAccessible);
 
 		return expandableFieldUri;
 	}
 
-	private String findExpansionUriFieldName(final Field expansionField) {
-		final Expandable fieldAnnotation = expansionField.getAnnotation(Expandable.class);
+	private String findExpansionUriFieldName(final FieldAccessor expansionFieldAccessor) {
+		final Expandable fieldAnnotation = expansionFieldAccessor.findAnnotation(Expandable.class);
 		if (null != fieldAnnotation) {
 			return fieldAnnotation.value();
-		}
-
-		final Expandable typeAnnotation = expansionField.getType()
-				.getAnnotation(Expandable.class);
-		if (null != typeAnnotation) {
-			return typeAnnotation.value();
 		}
 
 		return DEFAULT_EXPANSION_URI_FIELD_NAME;

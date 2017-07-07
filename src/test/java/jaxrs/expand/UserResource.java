@@ -1,7 +1,9 @@
 package jaxrs.expand;
 
 import java.net.URI;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 import javax.ws.rs.GET;
@@ -16,6 +18,8 @@ import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 
 import jaxrs.expand.GroupResource.Group;
+import jaxrs.expand.PermissionResource.Permission;
+import jersey.repackaged.com.google.common.collect.Maps;
 
 @Path("users")
 @Produces(MediaType.APPLICATION_JSON)
@@ -50,6 +54,18 @@ public final class UserResource
 		final Group group = new Group();
 		group.setId(groupId);
 		user.setGroup(group);
+		
+		Permission permission1 = new Permission();
+		permission1.setGroupId(6);
+		permission1.setName("expandMe");
+		Permission permission2 = new Permission();
+		permission2.setGroupId(8);
+		permission2.setName("dontExpandMe");
+		Map<String, Permission> userPermissions = Maps.newHashMapWithExpectedSize(2);
+		userPermissions.put("expandMe", permission1);
+		userPermissions.put("dontExpandMe", permission2);
+		user.setUserPermissions(userPermissions);
+		
 
 		return user;
 	}
@@ -60,6 +76,8 @@ public final class UserResource
 		private String name;
 
 		private Group group;
+		
+		private Map<String, Permission> userPermissions;
 
 		@InjectLink(resource = UserResource.class, method = "getUser")
 		private URI self;
@@ -90,6 +108,14 @@ public final class UserResource
 
 		public URI getSelf() {
 			return self;
+		}
+
+		public Map<String, Permission> getUserPermissions() {
+			return userPermissions;
+		}
+
+		public void setUserPermissions(Map<String, Permission> userPermissions) {
+			this.userPermissions = userPermissions;
 		}
 
 		@Override
